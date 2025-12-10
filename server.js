@@ -135,6 +135,6 @@ function getCodeMessage(code) {
   return codes[code] || `Error code: ${code}`;
 }
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`SMS Proxy running on port ${PORT}`);
 });
