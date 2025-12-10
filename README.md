@@ -25,6 +25,88 @@ npm start
 3. Add environment variables in Railway dashboard
 4. Railway will automatically deploy
 
+## Vercel Integration
+
+### Environment Variable Setup
+
+In your Vercel project, add the `SMS_PROXY_URL` environment variable:
+
+**⚠️ IMPORTANT: The URL MUST include `https://` protocol**
+
+```
+SMS_PROXY_URL=https://bulksms-proxy-production.up.railway.app
+```
+
+**❌ WRONG:**
+```
+SMS_PROXY_URL=bulksms-proxy-production.up.railway.app
+```
+
+**✅ CORRECT:**
+```
+SMS_PROXY_URL=https://bulksms-proxy-production.up.railway.app
+```
+
+### Example Vercel API Route
+
+**For Next.js App Router** (`app/api/sms/proxy/route.ts`):
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { number, message } = body;
+
+    if (!number || !message) {
+      return NextResponse.json(
+        { error: 'Number and message are required' },
+        { status: 400 }
+      );
+    }
+
+    // Ensure URL has protocol
+    const proxyUrl = process.env.SMS_PROXY_URL;
+    if (!proxyUrl) {
+      return NextResponse.json(
+        { error: 'SMS_PROXY_URL not configured' },
+        { status: 500 }
+      );
+    }
+
+    // Ensure URL has https:// protocol
+    const baseUrl = proxyUrl.startsWith('http') 
+      ? proxyUrl 
+      : `https://${proxyUrl}`;
+
+    const response = await fetch(`${baseUrl}/api/send-sms`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ number, message }),
+    });
+
+    const data = await response.json();
+
+    if (!data.success) {
+      return NextResponse.json(
+        { error: data.message || 'Failed to send SMS' },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(data);
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message || 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+```
+
 ## API Usage Examples
 
 ### Check Balance
@@ -51,3 +133,51 @@ curl -X POST https://your-railway-app.railway.app/api/send-sms-bulk \
     "message": "Test bulk message"
   }'
 ```
+
+## Troubleshooting
+
+### Error: "Failed to parse URL" or "Invalid URL"
+
+**Problem:** The `SMS_PROXY_URL` environment variable is missing the `https://` protocol.
+
+**Solution:**
+1. Go to your Vercel project dashboard
+2. Navigate to Settings → Environment Variables
+3. Update `SMS_PROXY_URL` to include `https://`:
+   ```
+   https://bulksms-proxy-production.up.railway.app
+   ```
+4. Redeploy your Vercel app
+
+**Alternative:** Update your Vercel API route code to automatically add the protocol (see example above).
+
+### Error: "IP Not whitelisted" (Code 1032)
+
+**Problem:** BulkSMSBD requires IP whitelisting. Your Railway IP address needs to be whitelisted.
+
+**Solution:**
+1. Find your Railway IP address:
+   ```bash
+   # Windows (PowerShell/CMD)
+   nslookup bulksms-proxy-production.up.railway.app
+   
+   # Mac/Linux
+   dig bulksms-proxy-production.up.railway.app +short
+   ```
+   Or check Railway's network settings in the dashboard.
+
+2. Contact BulkSMSBD support:
+   - Call or email BulkSMSBD support
+   - Provide your Railway IP address (e.g., `162.220.232.176`)
+   - Request IP whitelisting for your account
+   - Wait for confirmation (usually 1-24 hours)
+
+3. Once whitelisted, the error should resolve automatically.
+
+**Note:** The proxy service now properly handles object responses from BulkSMSBD API and will show the actual error message instead of `[object Object]`.
+
+### Railway deployment failed
+
+- Check Railway's "Deployments" tab for error logs
+- Ensure `package.json` has the correct start script
+- Verify all environment variables are set in Railway dashboard

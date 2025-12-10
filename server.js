@@ -66,12 +66,22 @@ app.post('/api/send-sms', async (req, res) => {
       }
     });
 
-    const code = response.data.toString().trim();
+    // Handle both string and object responses from BulkSMSBD
+    let code, errorMessage;
+    if (typeof response.data === 'object' && response.data !== null) {
+      code = response.data.response_code?.toString() || response.data.code?.toString() || 'unknown';
+      errorMessage = response.data.error_message || response.data.message || '';
+    } else {
+      code = response.data.toString().trim();
+    }
+
+    const codeStr = code.toString();
+    const message = errorMessage || getCodeMessage(codeStr);
 
     res.json({
-      success: code === '202',
-      code: code,
-      message: getCodeMessage(code),
+      success: codeStr === '202',
+      code: codeStr,
+      message: message,
       data: response.data
     });
 
@@ -109,12 +119,22 @@ app.post('/api/send-sms-bulk', async (req, res) => {
       }
     });
 
-    const code = response.data.toString().trim();
+    // Handle both string and object responses from BulkSMSBD
+    let code, errorMessage;
+    if (typeof response.data === 'object' && response.data !== null) {
+      code = response.data.response_code?.toString() || response.data.code?.toString() || 'unknown';
+      errorMessage = response.data.error_message || response.data.message || '';
+    } else {
+      code = response.data.toString().trim();
+    }
+
+    const codeStr = code.toString();
+    const message = errorMessage || getCodeMessage(codeStr);
 
     res.json({
-      success: code === '202',
-      code: code,
-      message: getCodeMessage(code),
+      success: codeStr === '202',
+      code: codeStr,
+      message: message,
       count: numbers.length,
       data: response.data
     });
@@ -130,7 +150,7 @@ function getCodeMessage(code) {
     '1001': 'Invalid Number',
     '1002': 'Sender ID not correct/disabled',
     '1007': 'Balance Insufficient',
-    '1032': 'IP Not whitelisted'
+    '1032': 'IP Not whitelisted. Please contact BulkSMSBD to whitelist your Railway IP address.'
   };
   return codes[code] || `Error code: ${code}`;
 }
