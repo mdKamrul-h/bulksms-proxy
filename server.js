@@ -76,12 +76,12 @@ app.post('/api/send-sms', async (req, res) => {
     }
 
     const codeStr = code.toString();
-    const message = errorMessage || getCodeMessage(codeStr);
+    const statusMessage = errorMessage || getCodeMessage(codeStr);
 
     res.json({
       success: codeStr === '202',
       code: codeStr,
-      message: message,
+      message: statusMessage,
       data: response.data
     });
 
@@ -129,12 +129,12 @@ app.post('/api/send-sms-bulk', async (req, res) => {
     }
 
     const codeStr = code.toString();
-    const message = errorMessage || getCodeMessage(codeStr);
+    const statusMessage = errorMessage || getCodeMessage(codeStr);
 
     res.json({
       success: codeStr === '202',
       code: codeStr,
-      message: message,
+      message: statusMessage,
       count: numbers.length,
       data: response.data
     });
