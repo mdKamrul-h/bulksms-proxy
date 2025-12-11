@@ -107,6 +107,48 @@ export async function POST(request: NextRequest) {
 }
 ```
 
+## Unicode/Bangla Support
+
+✅ **The SMS system automatically handles Bangla and English mixed messages!**
+
+### How It Works
+
+- **Automatic Detection**: The system automatically detects if your message contains Unicode characters (Bangla, Arabic, etc.)
+- **Auto Type Selection**: 
+  - If Unicode detected → Uses `type: 'unicode'` (supports Bangla/English mixed)
+  - If ASCII only → Uses `type: 'text'` (standard SMS)
+- **Message Length Limits**:
+  - **Unicode messages**: Maximum 70 characters per SMS
+  - **Text messages**: Maximum 160 characters per SMS
+
+### Examples
+
+**English only:**
+```json
+{
+  "number": "01712345678",
+  "message": "Hello, this is a test message"
+}
+```
+
+**Bangla only:**
+```json
+{
+  "number": "01712345678",
+  "message": "আপনার OTP হল 123456"
+}
+```
+
+**Bangla + English mixed:**
+```json
+{
+  "number": "01712345678",
+  "message": "Your OTP is 123456. এটি 5 মিনিটের জন্য বৈধ।"
+}
+```
+
+**No configuration needed!** The system handles everything automatically.
+
 ## API Usage Examples
 
 ### Check Balance
@@ -132,6 +174,20 @@ curl -X POST https://your-railway-app.railway.app/api/send-sms-bulk \
     "numbers": ["01712345678", "01812345678"],
     "message": "Test bulk message"
   }'
+```
+
+### Response Format
+
+The API response includes Unicode detection info:
+```json
+{
+  "success": true,
+  "code": "202",
+  "message": "SMS Submitted Successfully",
+  "isUnicode": true,
+  "maxLength": 70,
+  "data": {...}
+}
 ```
 
 ## Troubleshooting
@@ -175,6 +231,31 @@ curl -X POST https://your-railway-app.railway.app/api/send-sms-bulk \
 3. Once whitelisted, the error should resolve automatically.
 
 **Note:** The proxy service now properly handles object responses from BulkSMSBD API and will show the actual error message instead of `[object Object]`.
+
+### Error: "read ECONNRESET" or Connection Reset
+
+**Problem:** The connection to BulkSMSBD server was reset unexpectedly. This can happen due to:
+- Network instability
+- BulkSMSBD server closing connections
+- Request timeout
+- Server overload
+
+**Solution:**
+1. The proxy now includes:
+   - 30-second timeout for all requests
+   - Better error handling and retry-friendly error messages
+   - Connection keep-alive headers
+
+2. If the error persists:
+   - Wait a few seconds and try again (temporary network issue)
+   - Check if BulkSMSBD service is operational
+   - Verify your Railway IP is whitelisted (error 1032)
+   - For bulk sends, try sending in smaller batches
+
+3. The error message will now be more descriptive:
+   - `ECONNRESET`: "Connection reset by BulkSMSBD server. Please try again..."
+   - `ETIMEDOUT`: "Request timeout. The BulkSMSBD server took too long to respond..."
+   - Other connection errors are also handled with clear messages
 
 ### Railway deployment failed
 

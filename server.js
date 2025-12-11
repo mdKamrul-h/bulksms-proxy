@@ -5,6 +5,15 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configure axios with timeout and retry settings
+const axiosConfig = {
+  timeout: 30000, // 30 seconds timeout
+  headers: {
+    'User-Agent': 'BulkSMS-Proxy/1.0',
+    'Connection': 'keep-alive'
+  }
+};
+
 // Allow your Vercel domain
 app.use(cors({
   origin: '*', // Change this to your Vercel domain after testing
@@ -25,6 +34,7 @@ app.get('/', (req, res) => {
 app.get('/api/balance', async (req, res) => {
   try {
     const response = await axios.get('http://bulksmsbd.net/api/getBalanceApi', {
+      ...axiosConfig,
       params: {
         api_key: process.env.BULKSMS_API_KEY
       }
@@ -32,7 +42,8 @@ app.get('/api/balance', async (req, res) => {
 
     res.json({ success: true, data: response.data });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    const errorMessage = getErrorMessage(error);
+    res.status(500).json({ success: false, error: errorMessage });
   }
 });
 
@@ -56,10 +67,22 @@ app.post('/api/send-sms', async (req, res) => {
       cleanNumber = '88' + cleanNumber;
     }
 
+    // Detect Unicode and set appropriate type
+    const smsConfig = getSmsTypeAndMaxLength(message);
+    
+    // Validate message length
+    if (message.length > smsConfig.maxLength) {
+      return res.status(400).json({
+        success: false,
+        error: `Message too long. Maximum ${smsConfig.maxLength} characters allowed for ${smsConfig.isUnicode ? 'Unicode (Bangla/English mixed)' : 'text'} messages. Current length: ${message.length}`
+      });
+    }
+
     const response = await axios.get('http://bulksmsbd.net/api/smsapi', {
+      ...axiosConfig,
       params: {
         api_key: process.env.BULKSMS_API_KEY,
-        type: 'text',
+        type: smsConfig.type,
         number: cleanNumber,
         senderid: senderid || process.env.BULKSMS_SENDER_ID,
         message: message
@@ -82,11 +105,19 @@ app.post('/api/send-sms', async (req, res) => {
       success: codeStr === '202',
       code: codeStr,
       message: statusMessage,
+      isUnicode: smsConfig.isUnicode,
+      maxLength: smsConfig.maxLength,
       data: response.data
     });
 
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    const errorMessage = getErrorMessage(error);
+    res.status(500).json({ 
+      success: false, 
+      error: errorMessage,
+      code: undefined,
+      message: errorMessage
+    });
   }
 });
 
@@ -142,9 +173,22 @@ app.post('/api/send-sms-bulk', async (req, res) => {
     // Join numbers with comma
     const numbersString = cleanNumbers.join(',');
 
+    // Detect Unicode and set appropriate type
+    const smsConfig = getSmsTypeAndMaxLength(message);
+    
+    // Validate message length
+    if (message.length > smsConfig.maxLength) {
+      return res.status(400).json({
+        success: false,
+        error: `Message too long. Maximum ${smsConfig.maxLength} characters allowed for ${smsConfig.isUnicode ? 'Unicode (Bangla/English mixed)' : 'text'} messages. Current length: ${message.length}`
+      });
+    }
+
     // Check URL length (rough estimate: each number ~13 chars + commas)
     // Most servers have 2048 char URL limit, we'll be conservative
-    const estimatedUrlLength = numbersString.length + message.length + 200; // 200 for other params
+    // Note: Unicode messages may be URL-encoded, so we need extra buffer
+    const urlEncodedMessageLength = smsConfig.isUnicode ? message.length * 3 : message.length;
+    const estimatedUrlLength = numbersString.length + urlEncodedMessageLength + 200; // 200 for other params
     if (estimatedUrlLength > 2000) {
       return res.status(400).json({
         success: false,
@@ -153,9 +197,10 @@ app.post('/api/send-sms-bulk', async (req, res) => {
     }
 
     const response = await axios.get('http://bulksmsbd.net/api/smsapi', {
+      ...axiosConfig,
       params: {
         api_key: process.env.BULKSMS_API_KEY,
-        type: 'text',
+        type: smsConfig.type,
         number: numbersString,
         senderid: senderid || process.env.BULKSMS_SENDER_ID,
         message: message
@@ -181,13 +226,45 @@ app.post('/api/send-sms-bulk', async (req, res) => {
       count: cleanNumbers.length,
       originalCount: numbers.length,
       invalidCount: numbers.length - cleanNumbers.length,
+      isUnicode: smsConfig.isUnicode,
+      maxLength: smsConfig.maxLength,
       data: response.data
     });
 
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    const errorMessage = getErrorMessage(error);
+    res.status(500).json({ 
+      success: false, 
+      error: errorMessage,
+      code: undefined,
+      message: errorMessage
+    });
   }
 });
+
+// Helper function to detect if message contains Unicode characters (Bangla, Arabic, etc.)
+function containsUnicode(message) {
+  // Check if message contains any non-ASCII characters
+  // This includes Bangla (Bengali), Arabic, and other Unicode characters
+  for (let i = 0; i < message.length; i++) {
+    const charCode = message.charCodeAt(i);
+    // ASCII range is 0-127, anything above is Unicode
+    if (charCode > 127) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Helper function to determine SMS type and max length
+function getSmsTypeAndMaxLength(message) {
+  const hasUnicode = containsUnicode(message);
+  return {
+    type: hasUnicode ? 'unicode' : 'text',
+    maxLength: hasUnicode ? 70 : 160, // Unicode SMS: 70 chars, GSM-7: 160 chars
+    isUnicode: hasUnicode
+  };
+}
 
 function getCodeMessage(code) {
   const codes = {
@@ -198,6 +275,29 @@ function getCodeMessage(code) {
     '1032': 'IP Not whitelisted. Please contact BulkSMSBD to whitelist your Railway IP address.'
   };
   return codes[code] || `Error code: ${code}`;
+}
+
+// Helper function to format error messages
+function getErrorMessage(error) {
+  if (error.code === 'ECONNRESET') {
+    return 'Connection reset by BulkSMSBD server. Please try again. If the issue persists, the BulkSMSBD service may be temporarily unavailable.';
+  }
+  if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+    return 'Request timeout. The BulkSMSBD server took too long to respond. Please try again.';
+  }
+  if (error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN') {
+    return 'Cannot reach BulkSMSBD server. Please check your internet connection and try again.';
+  }
+  if (error.response) {
+    // Server responded with error status
+    return `BulkSMSBD API error: ${error.response.status} - ${error.response.statusText}`;
+  }
+  if (error.request) {
+    // Request was made but no response received
+    return 'No response from BulkSMSBD server. The service may be down or unreachable.';
+  }
+  // Other errors
+  return error.message || 'Unknown error occurred while communicating with BulkSMSBD';
 }
 
 app.listen(PORT, '0.0.0.0', () => {
