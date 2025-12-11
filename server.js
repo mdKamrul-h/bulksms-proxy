@@ -68,15 +68,8 @@ app.post('/api/send-sms', async (req, res) => {
     }
 
     // Detect Unicode and set appropriate type
-    const smsConfig = getSmsTypeAndMaxLength(message);
-    
-    // Validate message length
-    if (message.length > smsConfig.maxLength) {
-      return res.status(400).json({
-        success: false,
-        error: `Message too long. Maximum ${smsConfig.maxLength} characters allowed for ${smsConfig.isUnicode ? 'Unicode (Bangla/English mixed)' : 'text'} messages. Current length: ${message.length}`
-      });
-    }
+    // BulkSMSBD automatically handles message splitting, so no length limit needed
+    const smsConfig = getSmsType(message);
 
     const response = await axios.get('http://bulksmsbd.net/api/smsapi', {
       ...axiosConfig,
@@ -106,7 +99,7 @@ app.post('/api/send-sms', async (req, res) => {
       code: codeStr,
       message: statusMessage,
       isUnicode: smsConfig.isUnicode,
-      maxLength: smsConfig.maxLength,
+      messageLength: message.length,
       data: response.data
     });
 
@@ -174,17 +167,10 @@ app.post('/api/send-sms-bulk', async (req, res) => {
     const numbersString = cleanNumbers.join(',');
 
     // Detect Unicode and set appropriate type
-    const smsConfig = getSmsTypeAndMaxLength(message);
-    
-    // Validate message length
-    if (message.length > smsConfig.maxLength) {
-      return res.status(400).json({
-        success: false,
-        error: `Message too long. Maximum ${smsConfig.maxLength} characters allowed for ${smsConfig.isUnicode ? 'Unicode (Bangla/English mixed)' : 'text'} messages. Current length: ${message.length}`
-      });
-    }
+    // BulkSMSBD automatically handles message splitting, so no length limit needed
+    const smsConfig = getSmsType(message);
 
-    // Check URL length (rough estimate: each number ~13 chars + commas)
+    // Check URL length to prevent HTTP 414 errors (rough estimate)
     // Most servers have 2048 char URL limit, we'll be conservative
     // Note: Unicode messages may be URL-encoded, so we need extra buffer
     const urlEncodedMessageLength = smsConfig.isUnicode ? message.length * 3 : message.length;
@@ -192,7 +178,7 @@ app.post('/api/send-sms-bulk', async (req, res) => {
     if (estimatedUrlLength > 2000) {
       return res.status(400).json({
         success: false,
-        error: 'Request too large. Reduce number of recipients or message length.'
+        error: 'Request URL too large. Reduce number of recipients or message length to avoid URL length limits.'
       });
     }
 
@@ -227,7 +213,7 @@ app.post('/api/send-sms-bulk', async (req, res) => {
       originalCount: numbers.length,
       invalidCount: numbers.length - cleanNumbers.length,
       isUnicode: smsConfig.isUnicode,
-      maxLength: smsConfig.maxLength,
+      messageLength: message.length,
       data: response.data
     });
 
@@ -256,12 +242,12 @@ function containsUnicode(message) {
   return false;
 }
 
-// Helper function to determine SMS type and max length
-function getSmsTypeAndMaxLength(message) {
+// Helper function to determine SMS type
+// BulkSMSBD automatically handles message splitting, so we only need to detect Unicode for type parameter
+function getSmsType(message) {
   const hasUnicode = containsUnicode(message);
   return {
     type: hasUnicode ? 'unicode' : 'text',
-    maxLength: hasUnicode ? 70 : 160, // Unicode SMS: 70 chars, GSM-7: 160 chars
     isUnicode: hasUnicode
   };
 }
