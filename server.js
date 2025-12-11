@@ -95,6 +95,7 @@ app.post('/api/send-sms-bulk', async (req, res) => {
   try {
     const { numbers, message, senderid } = req.body;
 
+    // Validation
     if (!numbers || !Array.isArray(numbers) || !message) {
       return res.status(400).json({
         success: false,
@@ -102,18 +103,60 @@ app.post('/api/send-sms-bulk', async (req, res) => {
       });
     }
 
-    const cleanNumbers = numbers.map(num => {
-      let clean = num.toString().replace(/\D/g, '');
-      if (clean.startsWith('0')) return '88' + clean;
-      if (!clean.startsWith('88')) return '88' + clean;
-      return clean;
-    }).join(',');
+    if (numbers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Numbers array cannot be empty'
+      });
+    }
+
+    // Limit bulk sends to prevent URL length issues (max 100 numbers per request)
+    const MAX_BULK_COUNT = 100;
+    if (numbers.length > MAX_BULK_COUNT) {
+      return res.status(400).json({
+        success: false,
+        error: `Maximum ${MAX_BULK_COUNT} numbers allowed per bulk request. Received ${numbers.length} numbers.`
+      });
+    }
+
+    // Clean and validate phone numbers, filter out invalid ones
+    const cleanNumbers = numbers
+      .map(num => {
+        if (!num) return null;
+        let clean = num.toString().replace(/\D/g, '');
+        if (!clean || clean.length < 10) return null; // Minimum 10 digits
+        
+        if (clean.startsWith('0')) return '88' + clean;
+        if (!clean.startsWith('88')) return '88' + clean;
+        return clean;
+      })
+      .filter(num => num !== null); // Remove invalid numbers
+
+    if (cleanNumbers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid phone numbers found in the array'
+      });
+    }
+
+    // Join numbers with comma
+    const numbersString = cleanNumbers.join(',');
+
+    // Check URL length (rough estimate: each number ~13 chars + commas)
+    // Most servers have 2048 char URL limit, we'll be conservative
+    const estimatedUrlLength = numbersString.length + message.length + 200; // 200 for other params
+    if (estimatedUrlLength > 2000) {
+      return res.status(400).json({
+        success: false,
+        error: 'Request too large. Reduce number of recipients or message length.'
+      });
+    }
 
     const response = await axios.get('http://bulksmsbd.net/api/smsapi', {
       params: {
         api_key: process.env.BULKSMS_API_KEY,
         type: 'text',
-        number: cleanNumbers,
+        number: numbersString,
         senderid: senderid || process.env.BULKSMS_SENDER_ID,
         message: message
       }
@@ -135,7 +178,9 @@ app.post('/api/send-sms-bulk', async (req, res) => {
       success: codeStr === '202',
       code: codeStr,
       message: statusMessage,
-      count: numbers.length,
+      count: cleanNumbers.length,
+      originalCount: numbers.length,
+      invalidCount: numbers.length - cleanNumbers.length,
       data: response.data
     });
 
